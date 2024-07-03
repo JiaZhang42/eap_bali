@@ -1,26 +1,25 @@
 ---
 title: "Chapter 1"
 format: html
+toc: true
 editor: visual
 ---
 
-## Quarto
+We first introduce the type of sample, or data, required for each of the analyses presented in this part. We then discuss winsorization, a technique that is used to adjust data, in order to minimize the effect of outliers on statistical analyses. Finally, we explain Newey and West (1987)-adjusted standard errors, t-statistics, and p-values, which are commonly used to avoid problems with statistical inference associated with heteroscedasticity and autocorrelation in time-series data.
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+### Methodologies Sample
 
-## Running Code
+The sample covers a period of 25 years from 1988 through 2012 inclusive. For each year $t$, the sample includes all stocks $i$ in the Center for Research in Security Prices (CRSP) database that are listed as U.S.-based common stocks on December 31 of the year $t$.
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+### Outliers
 
-```{r}
-1 + 1
-```
+- winsorization: sets the values of a given variable that are above or below a certain cutoff to that cutoff.
+- truncation: takes values of a given variable that are deemed extreme to be missing.
 
-You can add options to executable code like this
+implemetation: 
 
-```{r}
-#| echo: false
-2 * 2
-```
+- winsorize or truncate using all values of the given variable X over all entities i and time periods t.
+- winsorize or truncate X separately for each time period t.
 
-The `echo: false` option disables the printing of code (only output is displayed).
+### Newey&West SE Adjustment
+- to account for the impact of autocorrelation and heteroscedasticity
