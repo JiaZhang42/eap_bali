@@ -1,0 +1,237 @@
+---
+title: "Chapter 7"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+### Commonly Used Universe of Stocks
+
+> U.S.-based common stocks that are listed on the New York Stock Exchange (NYSE), the American Stock Exchange (AMEX), or the National Association of Securities Dealers Automated Quotations (NASDAQ) system.
+
+-   CRSP stocks within a date range
+
+-   `SHRCD` 10 or 11
+
+-   `EXCHCD` 1 or 2 or 3
+
+**"sample universe (ID) first, other data later"**
+
+> For each month t, the sample is constructed by taking all U.S.-based common stocks in the CRSP database as of the end of the given month. These securities can be identified using CRSP’s monthly stock names (`msenames`) file. The set of all securities that are available as of the end of a month t includes all securities in the msenames file that have a start date (`NAMEDT` field) less than or equal to the last day of the given month and an end date (`NAMEENDT` field) that is greater than or equal to the last day of month t.
+
+::: callout-note
+It's actually unnecessary to check for the existence of stocks at the end of each month in `msenames` because `msf` automatically only include these stocks. This will be shown shortly.
+:::
+
+"U.S.-based common stocks": the subset of these securities that have a share code (`SHRCD` field in the `msenames` file) value of either 10 or 11.
+
+### **mktcap & \# of stocks across exchanges and sectors**
+
+Market Cap = abs(`ALTPRICE` \* `SHROUT`)/1000
+
+-   in the `msf` table
+
+-   in millions because `SHROUT` is in thousands
+
+-   use `ALTPRC` instead of `PRC` because `PRC` is either missing or set to 0 if there is no trading activity and no bid or ask prices available on the last trading day in the given month. The `ALTPRC` field is set to the last traded price, or the negative of the average of the bid and ask prices from the last trading day for which the necessary price or bid and ask data are available.
+
+```{r}
+library(tidyverse)
+library(DBI)
+library(RPostgres)
+library(dbplyr)
+library(lubridate)
+source('R/my_functions.R')
+```
+
+```{r}
+#| eval: false
+wrds <- dbConnect(Postgres(), 
+                       host = "wrds-pgdata.wharton.upenn.edu", 
+                       port = 9737, 
+                       dbname = 'wrds', 
+                       user = Sys.getenv('WRDS_USER'), 
+                       password = Sys.getenv('WRDS_PASS'), 
+                       sslmode = 'require')
+```
+
+```{r}
+#| eval: false
+# id first, other data later
+crsp_msenames <- tbl(wrds, I('crsp_a_stock.msenames'))
+start_date <- ymd('1988-01-31')
+end_date <- ymd('2012-12-31')
+date <- tibble(month_end_date = seq(ceiling_date(start_date, 'month'), ceiling_date(end_date, 'month'), by = 'month') - days(1))
+date_remote <- copy_inline(wrds, date)
+
+samp <- date_remote %>% 
+  left_join(crsp_msenames, join_by(between(month_end_date, namedt, nameendt))) %>% 
+  filter(shrcd %in% c(10, 11))
+
+crsp_msf <- tbl(wrds, I('crsp_a_stock.msf'))
+crsp_samp <- samp %>% 
+  mutate(month = floor_date(month_end_date, 'month')) %>% 
+  left_join(crsp_msf %>% 
+              select(permno, date:retx) %>% 
+              mutate(month = floor_date(date, 'month')), 
+            join_by(permno, month)) %>% 
+  mutate(mktcap = abs(altprc * shrout)/1000)
+
+# check: both samp and crsp_samp have 1713961 obs
+```
+
+### Stock Exchange Composition
+
+`EXCHCD` in `msenames`:
+
+-   NYSE: 1 or 31
+
+-   AMEX: 2 or 32
+
+-   NASDAQ: 3 or 33
+
+CRSP database does not include AMEX stocks prior to July 1962. Because of this, many studies restrict their sample to the period **from 1963** through present.
+
+```{r}
+#| eval: false
+exch_comp <- crsp_samp %>% 
+  filter(exchcd %in% c(1L, 2L, 3L)) %>% 
+  group_by(exchcd, month_end_date, month) %>% 
+  summarise(n = n(), mktcap = sum(mktcap, na.rm = T), .groups = 'drop') %>% 
+  collect()
+
+exch_comp %>% write_csv('data/exch_comp.csv')
+exch_comp %>% filter(month_end_date == ymd('2012-12-31'))
+
+# using stocks in crsp_msf directly
+crsp_msf %>% 
+  mutate(month = floor_date(date, 'month')) %>% 
+  filter(month == as.Date('2012-12-01')) %>% 
+  inner_join(crsp_msenames, join_by(permno, between(date, namedt, nameendt))) %>% 
+  filter(exchcd %in% c(1L, 2L, 3L), shrcd %in% c(10, 11)) %>% 
+  group_by(exchcd, month) %>% 
+  summarise(n = n())
+# which is the same as the composition using crsp_samp, indicating that the return data in CRSP msf exactly includes those present at the end of each month in msenames.
+```
+
+```{r}
+exch_comp <- read_csv('data/exch_comp.csv')
+exch_comp %>% 
+  mutate(exchcd = case_when(
+    exchcd == 1 ~ 'NYSE', 
+    exchcd == 2 ~ 'AMEX', 
+    .default = 'NASDAQ'
+  )) %>% 
+  ggplot(aes(month_end_date, n, color = exchcd)) + 
+  geom_line() + 
+  theme_hierarchy() + 
+  ggsci::scale_color_bmj()
+```
+
+Get CPI (BLS) data from FRED using `tidyquant`:
+
+> We use data for the All Urban Consumer series.
+
+which is **`CPIAUCNS`** in FRED data.
+
+```{r}
+#| eval: false
+library(tidyquant)
+tq_index_options()
+tq_index('SP500')
+tq_exchange_options()
+tq_get_options()
+cpi <- tq_get('CPIAUCNS', get = 'economic.data', from = floor_date(start_date, 'month'), to = end_date) %>% 
+  mutate(month = floor_date(date, 'month'), cpi = price/price[month == max(month)])
+cpi %>% write_csv('data/cpi.csv')
+```
+
+```{r}
+cpi <- read_csv('data/cpi.csv')
+exch_comp %>% 
+  left_join(cpi %>% select(month, cpi), join_by(month)) %>% 
+  mutate(mktcap_adj = mktcap/(cpi*1000)) %>% 
+  mutate(exchcd = case_when(
+    exchcd == 1 ~ 'NYSE', 
+    exchcd == 2 ~ 'AMEX', 
+    .default = 'NASDAQ'
+  )) %>% 
+  ggplot(aes(month_end_date, mktcap_adj, color = exchcd)) + 
+  geom_line() + 
+  theme_hierarchy() + 
+  ggsci::scale_color_bmj()
+```
+
+### Industry Composition
+
+SIC code: `SICCD` in `msenames`.
+
+```{r}
+#| eval: false
+indu_comp <- crsp_samp %>% 
+  mutate(industry = case_when(
+    between(siccd, 1, 999) ~ 'Agriculture', 
+    between(siccd, 1000, 1499) ~ 'Mining', 
+    between(siccd, 1500, 1799) ~ 'Construction',
+    between(siccd, 2000, 3999) ~ 'Manufacturing',
+    between(siccd, 4000, 4999) ~ 'Transportation',
+    between(siccd, 5000, 5199) ~ 'Wholesale',
+    between(siccd, 5200, 5999) ~ 'Retail',
+    between(siccd, 6000, 6799) ~ 'Finance',
+    between(siccd, 7000, 8999) ~ 'Services',
+    between(siccd, 9000, 9999) ~ 'Public', 
+    .default = NA
+  )) %>% 
+  group_by(industry, month_end_date, month) %>% 
+  summarise(n = n(), mktcap = sum(mktcap, na.rm = T), .groups = 'drop') %>% 
+  collect()
+indu_comp %>% write_csv('data/indu_comp.csv')
+```
+
+```{r}
+indu_comp <- read_csv('data/indu_comp.csv')
+indu_comp %>% 
+  ggplot(aes(month_end_date, n, color = industry)) + 
+  geom_line() + 
+  theme_hierarchy() + 
+  ggsci::scale_color_cosmic()
+
+indu_comp %>% 
+    left_join(cpi %>% select(month, cpi), join_by(month)) %>% 
+  mutate(mktcap_adj = mktcap/(cpi*1000)) %>% 
+  ggplot(aes(month_end_date, mktcap_adj, color = industry)) + 
+  geom_line() + 
+  theme_hierarchy() + 
+  ggsci::scale_color_cosmic()
+```
+
+### Returns & Excess Returns
+
+monthly stock returns:
+
+-   `RET` in `msf` for most stocks.
+
+-   `DLRET` in `msedelist` for delisted stocks when available
+
+-   If a delisting return is unavailable, we rely on the reason for the delisting, as indicated by the `DLSTCD` field, to determine the return.
+
+    -   If the `DLSTCD` is 500, 520, between 551 and 573 inclusive, 574, 580, or 584, we take the stock’s return during the delisting month to be −30%.
+
+    -   If the delisting return is not available and `DLSTCD` has any value other than those mentioned in the previous sentence, we take the return of the stock in the delisting month to be −100%.
+
+monthly excess returns:
+
+-   risk-free rate from Ken French's data library
+
+```{r}
+#| eval: false
+library(frenchdata)
+factors_ff3_monthly_raw <- download_french_data('Fama/French 3 Factors')
+
+factors_ff3_monthly <- factors_ff3_monthly_raw$subsets$data[[1]] %>% 
+  janitor::clean_names()
+factors_ff3_annual <- factors_ff3_monthly_raw$subsets$data[[2]] %>% 
+  janitor::clean_names()
+```

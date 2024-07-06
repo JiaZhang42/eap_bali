@@ -1,0 +1,18 @@
+---
+title: "Chapter 2"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+### Exemplary Summary Statistics Table
+
+![](images/clipboard-784891417.png)
+
+-   market cap is largely positively skewed, which is the reason to use size - the log market cap in analysis
+
+-   the subscript $t+1$: this type of variable generally looks at data from 1989 (sample start + 1) to 2012 (sample end).
+
+-   fail to capture time-series information: researchers should think about whether conclusions hold in good or bad times

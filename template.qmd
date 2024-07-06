@@ -1,0 +1,8 @@
+---
+title: "Chapter 1"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---

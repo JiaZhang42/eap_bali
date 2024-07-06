@@ -1,0 +1,218 @@
+---
+title: "Introduction"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+---
+
+## Reviews
+
+-   get familiar with `tidyquant`
+
+    -   note that yahoo finance in Mainland China is unavailable. Must use full-mask VPN.
+
+-   use `scales` to change the axes labels
+
+-   derivation of MVP weights and MVE weights - not complicated, simply constrained linear programming.
+
+-   once get two efficient weights, use the mutual fund separation theorem to get the whole frontier.
+
+## One stock
+
+```{r}
+#| message: false
+library(tidyverse)
+library(tidyquant)
+library(scales)
+source(here::here('R/winsorize.R'))
+```
+
+```{r}
+#| cache: true
+prices <- tq_get("AAPL", get = 'stock.prices', from = '2000-01-01', to = '2022-12-31')
+prices
+```
+
+```{r}
+prices %>% 
+  ggplot(aes(x = date, y = adjusted)) + 
+  geom_line() + 
+  theme_hierarchy()
+```
+
+```{r}
+returns <- prices %>% 
+  arrange(date) %>% 
+  mutate(ret = adjusted/lag(adjusted)-1) %>% 
+  select(symbol, date, ret)
+returns
+```
+
+```{r}
+returns <- returns %>% 
+  drop_na()
+```
+
+```{r}
+quantile_05 <- returns %>% 
+  pull(ret) %>% 
+  quantile(probs = 0.05)
+returns %>% 
+  ggplot(aes(x = ret)) + 
+  geom_histogram(bins = 100) + 
+  geom_vline(xintercept = quantile_05, linetype = 'dashed') + 
+  theme_hierarchy() + 
+  scale_x_continuous(labels = percent)
+```
+
+```{r}
+returns %>% 
+  summarise(
+    across(ret, list(
+      daily_mean = mean, 
+      daily_sd = sd, 
+      daily_min = min, 
+      daily_max = max
+      ))
+  )
+```
+
+## Scale up
+
+```{r}
+#| cache: true
+symbols <- tq_index('DOW') %>% 
+  filter(company != 'US DOLLAR')
+symbols
+```
+
+```{r}
+#| cache: true
+index_prices <- tq_get(symbols, get = 'stock.prices', from = '2000-01-01', to = '2022-12-31')
+```
+
+```{r}
+index_prices %>% 
+  ggplot(aes(x = date, y = adjusted, color = symbol)) + 
+  geom_line() + 
+  theme_hierarchy()
+```
+
+```{r}
+all_returns <- index_prices %>% 
+  group_by(symbol) %>% 
+  mutate(ret = adjusted/lag(adjusted) - 1) %>% 
+  ungroup() %>% 
+  select(symbol, date, ret) %>% 
+  drop_na()
+
+all_returns %>% 
+  group_by(symbol) %>% 
+  summarise(across(ret, list(
+    daily_mean = mean, 
+    daily_sd = sd, 
+    daily_min = min, 
+    daily_max = max
+  ), 
+    .names = '{.fn}'))
+```
+
+```{r}
+trading_volume <- index_prices %>% 
+  group_by(date) %>% 
+  summarise(trading_volume = sum(volume*adjusted, na.rm = T))
+
+trading_volume %>% 
+  ggplot(aes(x = date, y = trading_volume)) + 
+  geom_line() + 
+  theme_hierarchy()
+```
+
+```{r}
+trading_volume %>% 
+  ggplot(aes(lag(trading_volume), trading_volume)) + 
+  geom_point() + 
+  geom_abline(slope = 1, intercept = 0, linetype = 'dashed') + 
+  theme_hierarchy() + 
+  scale_x_continuous(labels = label_number(scale = 1e-9, suffix = 'B')) + 
+  scale_y_continuous(labels = label_number(scale = 1e-9, suffix = 'B'))
+```
+
+## Efficient frontier
+
+from daily prices to monthly returns
+
+```{r}
+index_prices <- index_prices %>% 
+  group_by(symbol) %>% 
+  mutate(n = n()) %>% 
+  ungroup() %>% 
+  filter(n == max(n)) %>% 
+  select(-n)
+
+returns <- index_prices %>% 
+  mutate(month = floor_date(date, 'month')) %>% 
+  group_by(symbol, month) %>% 
+  summarise(price = last(adjusted), .groups = "drop_last") %>% 
+  mutate(ret = price / lag(price) - 1) %>% 
+  drop_na() %>% 
+  select(-price) %>% 
+  ungroup()
+```
+
+```{r}
+returns_matrix <- returns %>%
+  pivot_wider(names_from = month, values_from = ret) %>%
+  select(-symbol) %>%
+  as.matrix()
+sigma <- cov(t(returns_matrix))
+mu <- rowMeans(returns_matrix)
+
+N <- nrow(returns_matrix)
+iota <- rep(1, N)
+sigma_inv <- solve(sigma)
+mvp_weights <- (sigma_inv %*% iota) / as.numeric(t(iota) %*% sigma_inv %*% iota)
+
+tibble(
+  average_ret = as.numeric(t(mvp_weights) %*% mu),
+  volatility = as.numeric(sqrt(t(mvp_weights) %*% sigma %*% mvp_weights))
+)
+```
+
+```{r}
+benchmark_multiple <- 3
+mu_bar <- benchmark_multiple * t(mvp_weights) %*% mu
+C <- as.numeric(t(iota) %*% sigma_inv %*% iota)
+D <- as.numeric(t(iota) %*% sigma_inv %*% mu)
+E <- as.numeric(t(mu) %*% sigma_inv %*% mu)
+lambda_2 <- as.numeric((D-C*mu_bar)/(C*E-D^2))
+lambda_1 <- as.numeric((E-D*mu_bar)/(C*E-D^2))
+lambda_tilde <- as.numeric(2 * (mu_bar - D / C) / (E - D^2 / C))
+
+efp_weights <- sigma_inv %*% (lambda_1*iota - lambda_2 * mu)
+efp_weights
+```
+
+Although one can get the frontier by changing $\mu$ , calculate the weights, and finally get the sd, a calculation efficient way is to use the mutual fund separation theorem (i.e., any portfolio on the frontier is a linear combination of two efficient portfolios).
+
+```{r}
+length_year <- 12
+a <- seq(from = -0.4, to = 1.9, by = 0.01)
+res <- tibble(
+  a = a,
+  mu = map_dbl(a, \(x) t(mu)%*%((1-x)*mvp_weights + x*efp_weights)*length_year), 
+  sd = map_dbl(a, \(x) sqrt(length_year * diag(t((1-x)*mvp_weights + x*efp_weights)%*%sigma%*%((1-x)*mvp_weights + x*efp_weights))))
+)
+
+res %>% 
+  ggplot(aes(sd, mu)) + 
+  geom_point() + 
+  geom_point(data = res %>% filter(a %in% c(0, 1)), size = 4) + 
+  geom_point(data = tibble(
+    mu = length_year * mu, 
+    sd = sqrt(length_year * diag(sigma))
+  ), size = 1) + 
+  theme_hierarchy()
+```
