@@ -1,0 +1,119 @@
+---
+title: "CAPM & Beta Estimation (Chapter 8 in Bali)"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute: 
+  eval: false
+---
+
+In most cases, market beta for any given period t is estimated using **only data from periods prior to and including period t**. A common approach is to estimate regression (8.3) using **one year’s worth of daily excess return** data.
+
+minimum obs requirement: 200 data points
+
+Correlation:
+
+There is a substantial common component between all of the measures of beta. The correlations between measures that use a longer measurement period are higher than those based on short measurement periods, potentially indicating that a **longer measurement period provides stable and therefore more accurate measurement**.
+
+Persistence:
+
+The use of longer measurement periods results in more accurate measures of beta. In addition, beta seems to be most accurately mea- sured using daily return data.
+
+```{r}
+library(tidyverse)
+library(duckdb)
+library(scales)
+library(slider)
+library(furrr)
+source(here::here('R/my_functions.R'))
+```
+
+```{r}
+tidy_finance <- dbConnect(duckdb(), here::here('data/tidy_finance'))
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  select(permno, month, industry, ret_excess) |>
+  collect()
+factors_ff3_monthly <- tbl(tidy_finance, "factors_ff3_monthly") |>
+  select(month, mkt_excess) |>
+  collect()
+crsp_monthly <- crsp_monthly |>
+  left_join(factors_ff3_monthly, join_by(month))
+```
+
+```{r}
+estimate_capm <- function(data, min_obs = 1) {
+  if (nrow(data) < min_obs) {
+    beta <- NA_real_
+  } else {
+    fit <- lm(ret_excess ~ mkt_excess, data = data)
+    beta <- as.numeric(coefficients(fit)[2])
+  }
+  return(beta)
+}
+
+roll_capm_estimation <- function(data, months, min_obs = 1){
+  data <- data %>% arrange(month)
+  betas <- slide_period_vec(
+    .x = data, 
+    .i = data$month, 
+    .period = 'month',
+    .before = months - 1, 
+    .complete = F, 
+    .f = ~estimate_capm(., min_obs)
+  )
+  
+  tibble(
+    month = data$month, 
+    beta = betas
+  )
+}
+
+a <- crsp_monthly %>% 
+  filter(permno == 14593) %>% 
+  roll_capm_estimation(months = 60, min_obs = 48)
+```
+
+## Parallelization
+
+```{r}
+n_cores <- availableCores() - 1
+plan(multisession, workers = n_cores)
+beta_monthly <- crsp_monthly %>% 
+  nest(data = c(month, ret_excess, mkt_excess)) %>% 
+  mutate(beta = future_map(
+    data, ~ roll_capm_estimation(., months = 60, min_obs = 48)
+  )) |>
+  unnest(beta) |>
+  select(permno, month, beta_monthly = beta) |>
+  drop_na()
+
+dbWriteTable(tidy_finance, 'beta', beta_monthly, overwrite = T)
+```
+
+## ts-average beta across industries
+
+```{r}
+beta_monthly %>% 
+  left_join(crsp_monthly, join_by(permno, month)) %>% 
+  group_by(industry, permno) %>% 
+  summarise(beta = mean(beta_monthly), .groups = 'drop') %>% 
+  ggplot(aes(x = reorder(industry, beta, FUN = median), y = beta)) + 
+  geom_boxplot() + 
+  coord_flip() + 
+  theme_hierarchy()
+```
+
+## cs beta over time
+
+```{r}
+beta_monthly %>% 
+  group_by(month) %>% 
+  reframe(quantile = seq(0.1, 0.9, 0.1), 
+          x = quantile(beta_monthly, quantile)) %>% 
+  ggplot(aes(month, x, color = as.factor(quantile*100))) +  
+  geom_line() + 
+  theme_hierarchy() + 
+  ggsci::scale_color_bmj()
+```
