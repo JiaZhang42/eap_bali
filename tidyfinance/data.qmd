@@ -203,7 +203,7 @@ wrds <- dbConnect(Postgres(),
                        user = Sys.getenv('WRDS_USER'), 
                        password = Sys.getenv('WRDS_PASS'), 
                        sslmode = 'require')
-dbListObjects(wrds, Id(schema = "crsp"))
+# dbListObjects(wrds, Id(schema = "crsp"))
 ```
 
 ```{r}
@@ -238,6 +238,7 @@ crsp_monthly <- msf_db %>%
              sharetype == 'NS', 
              securitytype == 'EQTY',
              securitysubtype == 'COM', 
+             usincflg == 'Y', 
              issuertype %in% c('ACOR', 'CORP')) %>% 
       select(permno, secinfostartdt, secinfoenddt,
                primaryexch, siccd), 
@@ -274,7 +275,7 @@ crsp_monthly <- crsp_monthly |>
 ```
 
 ::: callout-note
-Note that CRSP data is not necessarily arranged by date for some stocks. must arrange before lag.
+Note that CRSP data is not necessarily arranged by date for some stocks. must arrange before lag. Another caveat of lag is that it requires the time-series to be continuous, while there could be implicit missing values in real data.
 :::
 
 ```{r}
@@ -339,6 +340,10 @@ crsp_monthly %>%
   count(exchange, date) %>% 
   filter(date == ymd('2012-12-31'))
 # this sample is quite different from the one in Bali's book: "In December 2012, the CRSP sample is comprised of 3675 stocks, of which 1319 are listed on the NYSE, 226 are listed on the AMEX, and 2130 are listed on the NASDAQ"
+
+crsp_monthly %>% 
+  count(exchange, month) %>% 
+  filter(month == ymd('2022-12-01'))
 ```
 
 ```{r}

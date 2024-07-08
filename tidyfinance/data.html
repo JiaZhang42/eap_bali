@@ -325,7 +325,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a>                       <span class="at">user =</span> <span class="fu">Sys.getenv</span>(<span class="st">'WRDS_USER'</span>), </span>
 <span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a>                       <span class="at">password =</span> <span class="fu">Sys.getenv</span>(<span class="st">'WRDS_PASS'</span>), </span>
 <span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>                       <span class="at">sslmode =</span> <span class="st">'require'</span>)</span>
-<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a><span class="fu">dbListObjects</span>(wrds, <span class="fu">Id</span>(<span class="at">schema =</span> <span class="st">"crsp"</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a><span class="co"># dbListObjects(wrds, Id(schema = "crsp"))</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb13"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a>msf_db <span class="ot">&lt;-</span> <span class="fu">tbl</span>(wrds, <span class="fu">I</span>(<span class="st">'crsp.msf_v2'</span>))</span>
@@ -352,38 +352,39 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>             sharetype <span class="sc">==</span> <span class="st">'NS'</span>, </span>
 <span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>             securitytype <span class="sc">==</span> <span class="st">'EQTY'</span>,</span>
 <span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>             securitysubtype <span class="sc">==</span> <span class="st">'COM'</span>, </span>
-<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>             issuertype <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">'ACOR'</span>, <span class="st">'CORP'</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(permno, secinfostartdt, secinfoenddt,</span>
-<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>               primaryexch, siccd), </span>
-<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>    <span class="fu">join_by</span>(permno, <span class="fu">between</span>(mthcaldt, secinfostartdt, secinfoenddt))</span>
-<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span> </span>
-<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> <span class="fu">floor_date</span>(mthcaldt, <span class="st">'month'</span>)) <span class="sc">%&gt;%</span> </span>
-<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(</span>
-<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>    permno, <span class="co"># Security identifier</span></span>
-<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a>    <span class="at">date =</span> mthcaldt, <span class="co"># Date of the observation</span></span>
-<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a>    month, <span class="co"># Month of the observation</span></span>
-<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>    <span class="at">ret =</span> mthret, <span class="co"># Return</span></span>
-<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a>    shrout, <span class="co"># Shares outstanding (in thousands)</span></span>
-<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a>    <span class="at">prc =</span> mthprc, <span class="co"># Last traded price in a month</span></span>
-<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a>    primaryexch, <span class="co"># Primary exchange code</span></span>
-<span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a>    siccd <span class="co"># Industry code</span></span>
-<span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span> </span>
-<span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a>  <span class="fu">collect</span>() <span class="sc">%&gt;%</span> </span>
-<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> <span class="fu">ymd</span>(month), </span>
-<span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a>         <span class="at">shrout =</span> shrout <span class="sc">*</span> <span class="dv">1000</span>)</span>
-<span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
-<span id="cb14-33"><a href="#cb14-33" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
-<span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a>    <span class="at">mktcap =</span> shrout <span class="sc">*</span> prc <span class="sc">/</span> <span class="dv">10</span><span class="sc">^</span><span class="dv">6</span>,</span>
-<span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">mktcap =</span> <span class="fu">na_if</span>(mktcap, <span class="dv">0</span>)</span>
-<span id="cb14-36"><a href="#cb14-36" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-38"><a href="#cb14-38" aria-hidden="true" tabindex="-1"></a>mktcap_lag <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
-<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> month <span class="sc">%m+%</span> <span class="fu">months</span>(<span class="dv">1</span>)) <span class="sc">|&gt;</span></span>
-<span id="cb14-40"><a href="#cb14-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(permno, month, <span class="at">mktcap_lag =</span> mktcap)</span>
-<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb14-42"><a href="#cb14-42" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
-<span id="cb14-43"><a href="#cb14-43" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(mktcap_lag, <span class="fu">join_by</span>(permno, month))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>             usincflg <span class="sc">==</span> <span class="st">'Y'</span>, </span>
+<span id="cb14-13"><a href="#cb14-13" aria-hidden="true" tabindex="-1"></a>             issuertype <span class="sc">%in%</span> <span class="fu">c</span>(<span class="st">'ACOR'</span>, <span class="st">'CORP'</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-14"><a href="#cb14-14" aria-hidden="true" tabindex="-1"></a>      <span class="fu">select</span>(permno, secinfostartdt, secinfoenddt,</span>
+<span id="cb14-15"><a href="#cb14-15" aria-hidden="true" tabindex="-1"></a>               primaryexch, siccd), </span>
+<span id="cb14-16"><a href="#cb14-16" aria-hidden="true" tabindex="-1"></a>    <span class="fu">join_by</span>(permno, <span class="fu">between</span>(mthcaldt, secinfostartdt, secinfoenddt))</span>
+<span id="cb14-17"><a href="#cb14-17" aria-hidden="true" tabindex="-1"></a>    ) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-18"><a href="#cb14-18" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> <span class="fu">floor_date</span>(mthcaldt, <span class="st">'month'</span>)) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-19"><a href="#cb14-19" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(</span>
+<span id="cb14-20"><a href="#cb14-20" aria-hidden="true" tabindex="-1"></a>    permno, <span class="co"># Security identifier</span></span>
+<span id="cb14-21"><a href="#cb14-21" aria-hidden="true" tabindex="-1"></a>    <span class="at">date =</span> mthcaldt, <span class="co"># Date of the observation</span></span>
+<span id="cb14-22"><a href="#cb14-22" aria-hidden="true" tabindex="-1"></a>    month, <span class="co"># Month of the observation</span></span>
+<span id="cb14-23"><a href="#cb14-23" aria-hidden="true" tabindex="-1"></a>    <span class="at">ret =</span> mthret, <span class="co"># Return</span></span>
+<span id="cb14-24"><a href="#cb14-24" aria-hidden="true" tabindex="-1"></a>    shrout, <span class="co"># Shares outstanding (in thousands)</span></span>
+<span id="cb14-25"><a href="#cb14-25" aria-hidden="true" tabindex="-1"></a>    <span class="at">prc =</span> mthprc, <span class="co"># Last traded price in a month</span></span>
+<span id="cb14-26"><a href="#cb14-26" aria-hidden="true" tabindex="-1"></a>    primaryexch, <span class="co"># Primary exchange code</span></span>
+<span id="cb14-27"><a href="#cb14-27" aria-hidden="true" tabindex="-1"></a>    siccd <span class="co"># Industry code</span></span>
+<span id="cb14-28"><a href="#cb14-28" aria-hidden="true" tabindex="-1"></a>  ) <span class="sc">%&gt;%</span> </span>
+<span id="cb14-29"><a href="#cb14-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">collect</span>() <span class="sc">%&gt;%</span> </span>
+<span id="cb14-30"><a href="#cb14-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> <span class="fu">ymd</span>(month), </span>
+<span id="cb14-31"><a href="#cb14-31" aria-hidden="true" tabindex="-1"></a>         <span class="at">shrout =</span> shrout <span class="sc">*</span> <span class="dv">1000</span>)</span>
+<span id="cb14-32"><a href="#cb14-32" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-33"><a href="#cb14-33" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
+<span id="cb14-34"><a href="#cb14-34" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(</span>
+<span id="cb14-35"><a href="#cb14-35" aria-hidden="true" tabindex="-1"></a>    <span class="at">mktcap =</span> shrout <span class="sc">*</span> prc <span class="sc">/</span> <span class="dv">10</span><span class="sc">^</span><span class="dv">6</span>,</span>
+<span id="cb14-36"><a href="#cb14-36" aria-hidden="true" tabindex="-1"></a>    <span class="at">mktcap =</span> <span class="fu">na_if</span>(mktcap, <span class="dv">0</span>)</span>
+<span id="cb14-37"><a href="#cb14-37" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb14-38"><a href="#cb14-38" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-39"><a href="#cb14-39" aria-hidden="true" tabindex="-1"></a>mktcap_lag <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
+<span id="cb14-40"><a href="#cb14-40" aria-hidden="true" tabindex="-1"></a>  <span class="fu">mutate</span>(<span class="at">month =</span> month <span class="sc">%m+%</span> <span class="fu">months</span>(<span class="dv">1</span>)) <span class="sc">|&gt;</span></span>
+<span id="cb14-41"><a href="#cb14-41" aria-hidden="true" tabindex="-1"></a>  <span class="fu">select</span>(permno, month, <span class="at">mktcap_lag =</span> mktcap)</span>
+<span id="cb14-42"><a href="#cb14-42" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-43"><a href="#cb14-43" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="ot">&lt;-</span> crsp_monthly <span class="sc">|&gt;</span></span>
+<span id="cb14-44"><a href="#cb14-44" aria-hidden="true" tabindex="-1"></a>  <span class="fu">left_join</span>(mktcap_lag, <span class="fu">join_by</span>(permno, month))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="callout-note callout callout-style-default callout-captioned">
 <div class="callout-header d-flex align-content-center">
@@ -395,7 +396,7 @@ Note
 </div>
 </div>
 <div class="callout-body-container callout-body">
-<p>Note that CRSP data is not necessarily arranged by date for some stocks. must arrange before lag.</p>
+<p>Note that CRSP data is not necessarily arranged by date for some stocks. must arrange before lag. Another caveat of lag is that it requires the time-series to be continuous, while there could be implicit missing values in real data.</p>
 </div>
 </div>
 <div class="cell">
@@ -455,7 +456,11 @@ Note
 <span id="cb19-8"><a href="#cb19-8" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="sc">%&gt;%</span> </span>
 <span id="cb19-9"><a href="#cb19-9" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(exchange, date) <span class="sc">%&gt;%</span> </span>
 <span id="cb19-10"><a href="#cb19-10" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(date <span class="sc">==</span> <span class="fu">ymd</span>(<span class="st">'2012-12-31'</span>))</span>
-<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a><span class="co"># this sample is quite different from the one in Bali's book: "In December 2012, the CRSP sample is comprised of 3675 stocks, of which 1319 are listed on the NYSE, 226 are listed on the AMEX, and 2130 are listed on the NASDAQ"</span></span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb19-11"><a href="#cb19-11" aria-hidden="true" tabindex="-1"></a><span class="co"># this sample is quite different from the one in Bali's book: "In December 2012, the CRSP sample is comprised of 3675 stocks, of which 1319 are listed on the NYSE, 226 are listed on the AMEX, and 2130 are listed on the NASDAQ"</span></span>
+<span id="cb19-12"><a href="#cb19-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb19-13"><a href="#cb19-13" aria-hidden="true" tabindex="-1"></a>crsp_monthly <span class="sc">%&gt;%</span> </span>
+<span id="cb19-14"><a href="#cb19-14" aria-hidden="true" tabindex="-1"></a>  <span class="fu">count</span>(exchange, month) <span class="sc">%&gt;%</span> </span>
+<span id="cb19-15"><a href="#cb19-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(month <span class="sc">==</span> <span class="fu">ymd</span>(<span class="st">'2022-12-01'</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb20"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb20-1"><a href="#cb20-1" aria-hidden="true" tabindex="-1"></a><span class="fu">tbl</span>(tidy_finance, <span class="st">'crsp_monthly'</span>) <span class="sc">%&gt;%</span> </span>

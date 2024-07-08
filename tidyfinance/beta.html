@@ -108,9 +108,11 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
     <h2 id="toc-title">Table of contents</h2>
    
   <ul>
-  <li><a href="#parallelization" id="toc-parallelization" class="nav-link active" data-scroll-target="#parallelization">Parallelization</a></li>
+  <li><a href="#rolling-window-beta-estimation" id="toc-rolling-window-beta-estimation" class="nav-link active" data-scroll-target="#rolling-window-beta-estimation">Rolling window beta estimation</a></li>
+  <li><a href="#parallelization" id="toc-parallelization" class="nav-link" data-scroll-target="#parallelization">Parallelization</a></li>
   <li><a href="#ts-average-beta-across-industries" id="toc-ts-average-beta-across-industries" class="nav-link" data-scroll-target="#ts-average-beta-across-industries">ts-average beta across industries</a></li>
-  <li><a href="#cs-beta-over-time" id="toc-cs-beta-over-time" class="nav-link" data-scroll-target="#cs-beta-over-time">cs beta over time</a></li>
+  <li><a href="#cs-beta-percentiles-over-time" id="toc-cs-beta-percentiles-over-time" class="nav-link" data-scroll-target="#cs-beta-percentiles-over-time">cs beta percentiles over time</a></li>
+  <li><a href="#beta-sorted-portfolios-univariate" id="toc-beta-sorted-portfolios-univariate" class="nav-link" data-scroll-target="#beta-sorted-portfolios-univariate">Beta-sorted portfolios (univariate)</a></li>
   </ul>
 </nav>
 </div>
@@ -133,6 +135,8 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 
 </header>
 
+<section id="rolling-window-beta-estimation" class="level2">
+<h2 class="anchored" data-anchor-id="rolling-window-beta-estimation">Rolling window beta estimation</h2>
 <p>In most cases, market beta for any given period t is estimated using <strong>only data from periods prior to and including period t</strong>. A common approach is to estimate regression (8.3) using <strong>one year’s worth of daily excess return</strong> data.</p>
 <p>minimum obs requirement: 200 data points</p>
 <p>Correlation:</p>
@@ -145,7 +149,10 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb1-3"><a href="#cb1-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(scales)</span>
 <span id="cb1-4"><a href="#cb1-4" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(slider)</span>
 <span id="cb1-5"><a href="#cb1-5" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(furrr)</span>
-<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">'R/my_functions.R'</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb1-6"><a href="#cb1-6" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(lmtest)</span>
+<span id="cb1-7"><a href="#cb1-7" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(broom)</span>
+<span id="cb1-8"><a href="#cb1-8" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(sandwich)</span>
+<span id="cb1-9"><a href="#cb1-9" aria-hidden="true" tabindex="-1"></a><span class="fu">source</span>(here<span class="sc">::</span><span class="fu">here</span>(<span class="st">'R/my_functions.R'</span>))</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb2"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a>tidy_finance <span class="ot">&lt;-</span> <span class="fu">dbConnect</span>(<span class="fu">duckdb</span>(), here<span class="sc">::</span><span class="fu">here</span>(<span class="st">'data/tidy_finance'</span>))</span>
@@ -190,6 +197,7 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb3-29"><a href="#cb3-29" aria-hidden="true" tabindex="-1"></a>  <span class="fu">filter</span>(permno <span class="sc">==</span> <span class="dv">14593</span>) <span class="sc">%&gt;%</span> </span>
 <span id="cb3-30"><a href="#cb3-30" aria-hidden="true" tabindex="-1"></a>  <span class="fu">roll_capm_estimation</span>(<span class="at">months =</span> <span class="dv">60</span>, <span class="at">min_obs =</span> <span class="dv">48</span>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
+</section>
 <section id="parallelization" class="level2">
 <h2 class="anchored" data-anchor-id="parallelization">Parallelization</h2>
 <div class="cell">
@@ -220,8 +228,8 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb5-8"><a href="#cb5-8" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_hierarchy</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 </section>
-<section id="cs-beta-over-time" class="level2">
-<h2 class="anchored" data-anchor-id="cs-beta-over-time">cs beta over time</h2>
+<section id="cs-beta-percentiles-over-time" class="level2">
+<h2 class="anchored" data-anchor-id="cs-beta-percentiles-over-time">cs beta percentiles over time</h2>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb6"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>beta_monthly <span class="sc">%&gt;%</span> </span>
 <span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>  <span class="fu">group_by</span>(month) <span class="sc">%&gt;%</span> </span>
@@ -231,6 +239,14 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>  <span class="fu">geom_line</span>() <span class="sc">+</span> </span>
 <span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>  <span class="fu">theme_hierarchy</span>() <span class="sc">+</span> </span>
 <span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>  ggsci<span class="sc">::</span><span class="fu">scale_color_bmj</span>()</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+</div>
+</section>
+<section id="beta-sorted-portfolios-univariate" class="level2">
+<h2 class="anchored" data-anchor-id="beta-sorted-portfolios-univariate">Beta-sorted portfolios (univariate)</h2>
+<p><strong>idea behind portfolio sorting:</strong></p>
+<p>the idea is to sort individual stocks into portfolios, where the stocks within each portfolio are similar with respect to a sorting variable, such as firm size. The different portfolios then represent well-diversified investments that differ in the level of the sorting variable. You can then attribute the differences in the return distribution to the impact of the sorting variable.</p>
+<div class="cell">
+
 </div>
 </section>
 
