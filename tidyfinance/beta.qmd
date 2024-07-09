@@ -108,6 +108,7 @@ beta_monthly %>%
   geom_boxplot() + 
   coord_flip() + 
   theme_hierarchy()
+
 ```
 
 ## cs beta percentiles over time
@@ -123,7 +124,23 @@ beta_monthly %>%
   ggsci::scale_color_bmj()
 ```
 
-## Beta-sorted portfolios (univariate)
+## Beta & stock returns
+
+-   portfolio sorts or fama-macbeth regression
+
+fundamental prediction of CAPM: positive relationship between market beta and expected returns
+
+data:
+
+-   flat or negative relationship between beta and expected return
+
+-   non-zero alpha
+
+popular explanation of the negative relation:
+
+-   BAB: leverage limited investors with low risk aversion choose high-beta stocks, so BAB earns higher expected return by providing liquidity to these investors.
+
+### Beta-sorted portfolios (univariate)
 
 motivation:
 
@@ -251,7 +268,7 @@ beta_portfolios_summary |>
   theme_hierarchy()
 ```
 
-## security market line
+### security market line
 
 ```{r}
 sml_capm <- lm(ret_excess ~ 1 + beta, data = beta_portfolios_summary)$coefficients

@@ -1,0 +1,289 @@
+---
+title: "Size Sorts and p-Hacking"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute:
+  eval: false
+---
+
+## Summary
+
+-   small stocks (stocks with low market capitalization) outperform large stocks
+
+-   this result is primarily driven by extremely small stocks that generate very high average returns but comprise a small percentage of total stock market capitalization.
+
+    -   see returns of 10 decile portfolios
+
+    -   these small stocks are illiquid, making it hard to exploit
+
+    -   consistent evidence: Value-weighted portfolios tend to produce weaker results than equal-weighted portfolios.
+
+    -   consistent evidence: Calculation of portfolio breakpoints using only stocks listed on the NYSE substantially diminishes the detected magnitude of the returns associated with size investing compared to portfolios formed using breakpoints calculated using all stocks.
+
+-   The size phenomenon is not explained by cross-sectional variation in market beta (double sort or FM)
+
+```{r}
+library(tidyverse)
+library(duckdb)
+library(scales)
+library(lmtest)
+library(sandwich)
+library(furrr)
+library(rlang)
+source(here::here('R/my_functions.R'))
+```
+
+```{r}
+tidy_finance <- dbConnect(duckdb(), here::here('data/tidy_finance'))
+
+crsp_monthly <- tbl(tidy_finance, 'crsp_monthly') %>% 
+  collect()
+factors_ff3_monthly <- tbl(tidy_finance, 'factors_ff3_monthly') %>% 
+  select(month, smb) %>% 
+  collect()
+```
+
+## Size Distribution
+
+```{r}
+crsp_monthly %>% 
+  group_by(month) %>% 
+  mutate(
+    top01 = if_else(mktcap >= quantile(mktcap, 0.99), 1, 0), 
+    top05 = if_else(mktcap >= quantile(mktcap, 0.95), 1, 0), 
+    top10 = if_else(mktcap >= quantile(mktcap, 0.9), 1, 0), 
+    top25 = if_else(mktcap >= quantile(mktcap, 0.75), 1, 0)
+  ) %>% 
+  summarise(
+    total_mktcap = sum(mktcap),
+    `Largest 1% of stocks` = sum(top01 * mktcap)/total_mktcap, 
+    `Largest 5% of stocks` = sum(top05 * mktcap)/total_mktcap, 
+    `Largest 10% of stocks` = sum(top10 * mktcap)/total_mktcap, 
+    `Largest 25% of stocks` = sum(top25 * mktcap)/total_mktcap
+  ) %>% 
+  pivot_longer(cols = -c(month, total_mktcap), 
+               names_to = 'type', 
+               values_to = 'share') %>% 
+  ggplot(aes(x = month, y = share, color = type)) + 
+  geom_line() + 
+  scale_y_continuous(limits = c(0, 1), labels = label_percent()) + 
+  theme_hierarchy()
+```
+
+### Lorenz Curve
+
+```{r}
+crsp_monthly %>% 
+  filter(month == ymd('1960-02-01')) %>% 
+  select(mktcap) %>% 
+  mutate(qt = ntile(mktcap, 100)/100) %>% 
+  arrange(mktcap) %>% 
+  group_by(qt) %>% 
+  summarise(mktcap = sum(mktcap), .groups = 'drop') %>% 
+  mutate(mktcap_cumsum = cumsum(mktcap)/sum(mktcap)) %>% 
+  ggplot(aes(qt, mktcap_cumsum)) + 
+  geom_path() + 
+  geom_abline(slope = 1, intercept = 0, linetype = 'dashed') + 
+  scale_y_continuous(limits = c(0, 1), labels = label_percent()) + 
+  scale_x_continuous(limits = c(0, 1), labels = label_percent()) + 
+  theme_hierarchy()
+```
+
+## Univariate size sort
+
+```{r}
+assign_portfolio <- function(n_portfolios,
+                             exchanges,
+                             data) {
+  # Compute breakpoints
+  breakpoints <- data |>
+    filter(exchange %in% exchanges) |>
+    pull(mktcap_lag) |>
+    quantile(
+      probs = seq(0, 1, length.out = n_portfolios + 1),
+      na.rm = TRUE,
+      names = FALSE
+    )
+
+  # Assign portfolios
+  findInterval(data$mktcap_lag,
+      breakpoints,
+      all.inside = TRUE
+    )
+}
+```
+
+## weighting scheme
+
+-   value weighting: equal number of each stock in a portfolio
+
+-   equal weighting: equal dollar value of each stock in a portfolio
+
+Notice that equal-weighting is difficult in practice as the portfolio manager needs to rebalance the portfolio monthly while **value-weighting is a truly passive investment**.
+
+-   weights in value-weighting automatically adjusts due to gain or loss of a stock.
+
+Value-weighted portfolios produce weaker size effect in general.
+
+```{r}
+compute_portfolio_returns <- function(n_portfolios = 10,
+                                      exchanges = c("NYSE", "NASDAQ", "AMEX"),
+                                      value_weighted = TRUE,
+                                      data = crsp_monthly) {
+  data |>
+    group_by(month) |>
+    mutate(portfolio = assign_portfolio(
+      n_portfolios = n_portfolios,
+      exchanges = exchanges,
+      data = pick(everything())
+    )) |>
+    group_by(month, portfolio) |>
+    summarize(
+      ret = if_else(value_weighted,
+        weighted.mean(ret_excess, mktcap_lag),
+        mean(ret_excess)
+      ),
+      .groups = "drop_last"
+    ) |>
+    summarize(size_premium = ret[portfolio == min(portfolio)] -
+      ret[portfolio == max(portfolio)]) |>
+    summarize(size_premium = mean(size_premium))
+}
+```
+
+```{r}
+ret_all <- compute_portfolio_returns(
+  n_portfolios = 2,
+  exchanges = c("NYSE", "NASDAQ", "AMEX"),
+  value_weighted = TRUE,
+  data = crsp_monthly
+)
+
+ret_nyse <- compute_portfolio_returns(
+  n_portfolios = 2,
+  exchanges = "NYSE",
+  value_weighted = TRUE,
+  data = crsp_monthly
+)
+
+tibble(
+  Exchanges = c("NYSE, NASDAQ & AMEX", "NYSE"),
+  Premium = as.numeric(c(ret_all, ret_nyse)) * 100
+)
+```
+
+## Choices to make and p-hacking
+
+-   the number of portfolios
+
+-   the listing exchanges to form breakpoints
+
+-   and equal- or value-weighting
+
+-   whether to exclude firms that are active in the finance industry
+
+-   whether to restrict the analysis to some parts of the time series.
+
+```{r}
+p_hacking_setup <- expand_grid(
+  n_portfolios = c(2, 5, 10),
+  exchanges = list("NYSE", c("NYSE", "NASDAQ", "AMEX")),
+  value_weighted = c(TRUE, FALSE),
+  data = parse_exprs(
+    'crsp_monthly; 
+     crsp_monthly |> filter(industry != "Finance");
+     crsp_monthly |> filter(month < "1990-06-01");
+     crsp_monthly |> filter(month >="1990-06-01")'
+  )
+)
+
+p_hacking_setup <- expand_grid(
+  n_portfolios = c(2, 5, 10),
+  exchanges = list("NYSE", c("NYSE", "NASDAQ", "AMEX")),
+  value_weighted = c(TRUE, FALSE),
+  data = exprs(
+     crsp_monthly, 
+     crsp_monthly |> filter(industry != "Finance"),
+     crsp_monthly |> filter(month < "1990-06-01"),
+     crsp_monthly |> filter(month >="1990-06-01")
+  )
+)
+
+```
+
+```{r}
+n_cores <- availableCores() - 1
+plan(multisession, workers = n_cores)
+p_hacking_results <- p_hacking_setup %>% 
+  mutate(size_premium = future_pmap(
+    list(n_portfolios, exchanges, value_weighted, data), 
+    \(x, y, z, d) compute_portfolio_returns(x, y, z, eval_tidy(d))
+  )) %>% 
+  unnest(size_premium)
+
+a <- p_hacking_results %>% 
+  mutate(data = map_chr(data, deparse)) %>% 
+  arrange(desc(size_premium))
+```
+
+```{r}
+p_hacking_results |>
+  ggplot(aes(x = size_premium)) +
+  geom_histogram(bins = nrow(p_hacking_results), fill = 'steelblue') +
+  labs(
+    x = NULL, y = NULL,
+    title = "Distribution of size premiums for different sorting choices"
+  ) +
+  geom_vline(aes(xintercept = mean(factors_ff3_monthly$smb)),
+    linetype = "dashed"
+  ) +
+  scale_x_continuous(labels = percent) + 
+  theme_hierarchy()
+```
+
+## alpha and beta of the size long-short portfolio
+
+```{r}
+compute_portfolio_alpha_beta <- function(n_portfolios = 10,
+                                      exchanges = c("NYSE", "NASDAQ", "AMEX"),
+                                      value_weighted = TRUE,
+                                      data = crsp_monthly) {
+  data |>
+    group_by(month) |>
+    mutate(portfolio = assign_portfolio(
+      n_portfolios = n_portfolios,
+      exchanges = exchanges,
+      data = pick(everything())
+    )) |>
+    group_by(month, portfolio) |>
+    summarize(
+      ret = if_else(value_weighted,
+        weighted.mean(ret_excess, mktcap_lag),
+        mean(ret_excess)
+      ),
+      .groups = "drop_last"
+    ) |>
+    summarize(size_premium = ret[portfolio == min(portfolio)] -
+      ret[portfolio == max(portfolio)]) %>% 
+    left_join(factors_ff3_monthly %>% select(month, mkt_excess), join_by(month)) %>% 
+    lm(size_premium ~ mkt_excess, data = .) %>% 
+    coef()
+}
+
+factors_ff3_monthly <- tbl(tidy_finance, 'factors_ff3_monthly') %>% collect()
+```
+
+```{r}
+p_hacking_alpha_beta <- p_hacking_setup %>% 
+  mutate(alpha_beta = future_pmap(
+    list(n_portfolios, exchanges, value_weighted, data), 
+    \(x, y, z, d) compute_portfolio_alpha_beta(x, y, z, eval_tidy(d))
+  )) %>% 
+  unnest_wider(alpha_beta)
+
+p_hacking_alpha_beta <- p_hacking_alpha_beta %>% 
+  rename(alpha = `(Intercept)`, beta = mkt_excess)
+```
