@@ -77,7 +77,7 @@ crsp_monthly %>%
 
 ```{r}
 crsp_monthly %>% 
-  filter(month == ymd('1960-02-01')) %>% 
+  # filter(month == ymd('1960-02-01')) %>% 
   select(mktcap) %>% 
   mutate(qt = ntile(mktcap, 100)/100) %>% 
   arrange(mktcap) %>% 
