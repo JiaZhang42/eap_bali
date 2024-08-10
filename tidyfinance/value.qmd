@@ -185,3 +185,7 @@ value_premium <- value_portfolios |>
     value_premium = mean(value_premium)
   )
 ```
+
+Dependent-sort is used when the objective is to understand the relation between X2 and Y conditional on X1. The relation between X1 and Y is not examined in dependent-sort analysis.
+
+Independent-sort permits examination of relation between any one of the X and Y, controlling for the other X.

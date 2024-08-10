@@ -321,17 +321,18 @@ code span.wa { color: #60a0b0; font-weight: bold; font-style: italic; } /* Warni
 <span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a>  )</span>
 <span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>)</span>
 <span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a></span>
-<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>p_hacking_setup <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(</span>
-<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_portfolios =</span> <span class="fu">c</span>(<span class="dv">2</span>, <span class="dv">5</span>, <span class="dv">10</span>),</span>
-<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">exchanges =</span> <span class="fu">list</span>(<span class="st">"NYSE"</span>, <span class="fu">c</span>(<span class="st">"NYSE"</span>, <span class="st">"NASDAQ"</span>, <span class="st">"AMEX"</span>)),</span>
-<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">value_weighted =</span> <span class="fu">c</span>(<span class="cn">TRUE</span>, <span class="cn">FALSE</span>),</span>
-<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> <span class="fu">exprs</span>(</span>
-<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>     crsp_monthly, </span>
-<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(industry <span class="sc">!=</span> <span class="st">"Finance"</span>),</span>
-<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(month <span class="sc">&lt;</span> <span class="st">"1990-06-01"</span>),</span>
-<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(month <span class="sc">&gt;=</span><span class="st">"1990-06-01"</span>)</span>
-<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>  )</span>
-<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a><span class="co"># or</span></span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>p_hacking_setup <span class="ot">&lt;-</span> <span class="fu">expand_grid</span>(</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>  <span class="at">n_portfolios =</span> <span class="fu">c</span>(<span class="dv">2</span>, <span class="dv">5</span>, <span class="dv">10</span>),</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a>  <span class="at">exchanges =</span> <span class="fu">list</span>(<span class="st">"NYSE"</span>, <span class="fu">c</span>(<span class="st">"NYSE"</span>, <span class="st">"NASDAQ"</span>, <span class="st">"AMEX"</span>)),</span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a>  <span class="at">value_weighted =</span> <span class="fu">c</span>(<span class="cn">TRUE</span>, <span class="cn">FALSE</span>),</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>  <span class="at">data =</span> <span class="fu">exprs</span>(</span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>     crsp_monthly, </span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(industry <span class="sc">!=</span> <span class="st">"Finance"</span>),</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(month <span class="sc">&lt;</span> <span class="st">"1990-06-01"</span>),</span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>     crsp_monthly <span class="sc">|&gt;</span> <span class="fu">filter</span>(month <span class="sc">&gt;=</span><span class="st">"1990-06-01"</span>)</span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>  )</span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>)</span></code><button title="Copy to Clipboard" class="code-copy-button"><i class="bi"></i></button></pre></div>
 </div>
 <div class="cell">
 <div class="sourceCode cell-code" id="cb9"><pre class="sourceCode r code-with-copy"><code class="sourceCode r"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a>n_cores <span class="ot">&lt;-</span> <span class="fu">availableCores</span>() <span class="sc">-</span> <span class="dv">1</span></span>

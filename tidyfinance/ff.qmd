@@ -1,0 +1,284 @@
+---
+title: "Replicating Fama-French Factors"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute: 
+  eval: false
+---
+
+-   market
+
+-   size: SMB
+
+-   value: HML
+
+-   profitability: RMW (robust-minus-weak)
+
+    -   difference between the returns of firms with high and low operating profitability
+
+-   investment: CMA (conservative-minus-aggressive)
+
+    -   difference between firms with **high** versus **low** investment rates
+
+Note that ff3's HML is independent sort, while ff5's HML, RMW, CMA are dependent sort.
+
+```{r}
+library(tidyverse)
+library(duckdb)
+
+tidy_finance <- dbConnect(duckdb(), here::here('data/tidy_finance'))
+crsp_monthly <- tbl(tidy_finance, 'crsp_monthly') %>% 
+  select(permno, gvkey, month, ret_excess, mktcap, mktcap_lag, exchange) %>% 
+  collect()
+
+compustat <- tbl(tidy_finance, 'compustat') %>% 
+  select(gvkey, datadate, be, op, inv) %>% 
+  collect()
+
+factors_ff3_monthly <- tbl(tidy_finance, 'factors_ff3_monthly') %>% 
+  select(month, smb, hml) %>% 
+  collect()
+
+factors_ff5_monthly <- tbl(tidy_finance, 'factors_ff5_monthly') %>% 
+  select(month, smb, hml, rmw, cma) %>% 
+  collect()
+
+factors_ff3_monthly %>% 
+  left_join(factors_ff5_monthly, join_by(month)) %>% 
+  filter(smb.x != smb.y)
+
+factors_ff3_monthly %>% 
+  left_join(factors_ff5_monthly, join_by(month)) %>% 
+  filter(hml.x != hml.y)
+# They're different because the universe of stocks are slightly different due to NAs of op and inv for some stocks
+```
+
+## Timeline
+
+First, Fama and French form their portfolios in June of year t, whereby the returns of July are the first monthly return for the respective portfolio. For firm size, they consequently use the market capitalization recorded for June. It is then held constant until June of year t+1.
+
+Second, Fama and French also have a different protocol for computing the book-to-market ratio. They use market equity as of the end of year t−1 and the book equity reported in year t−1, i.e., the `datadate` is within the last year. Hence, the book-to-market ratio can be based on accounting information that is up to 18 months old. Market equity also does not necessarily reflect the same time point as book equity. The other sorting variables are analogously to book equity taken from year t−1.
+
+```{r}
+size <- crsp_monthly %>% 
+  filter(month(month) == 6) %>% 
+  mutate(sorting_date = month %m+% months(1)) %>% 
+  select(permno, exchange, sorting_date, size = mktcap)
+
+market_equity <- crsp_monthly %>% 
+  filter(month(month) == 12) %>% 
+  mutate(sorting_date = ymd(paste0(year(month) + 1, '0701'))) %>% 
+  select(permno, gvkey, sorting_date, me = mktcap)
+
+book_to_market <- compustat %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate) + 1, '0701'))) %>% 
+  select(gvkey, sorting_date, be) %>% 
+  inner_join(market_equity, join_by(sorting_date, gvkey)) %>% 
+  mutate(bm = be / me) %>% 
+  select(permno, sorting_date, me, bm)
+
+sorting_variables <- size %>% 
+  inner_join(book_to_market, join_by(sorting_date, permno)) %>% 
+  drop_na() %>% 
+  distinct(permno, sorting_date, .keep_all = T)
+```
+
+## Portfolio Formation
+
+```{r}
+assign_portfolio <- function(data, sorting_variable, percentiles){
+  breakpoints <- data %>% 
+    filter(exchange == 'NYSE') %>% 
+    pull({{ sorting_variable }}) %>% 
+    quantile(
+      probs = percentiles, 
+      na.rm = T, 
+      names = F
+    )
+  
+  data %>% 
+    pull({{ sorting_variable }}) %>% 
+    findInterval(breakpoints, all.inside = T)
+}
+
+portfolios <- sorting_variables %>% 
+  group_by(sorting_date) %>% 
+  mutate(portfolio_size = assign_portfolio(
+    data = pick(everything()), 
+    sorting_variable = size, 
+    percentiles = c(0, 0.5, 1)
+  ), 
+  portfolio_bm = assign_portfolio(
+    data = pick(everything()), 
+    sorting_variable = bm, 
+    percentiles = c(0, 0.3, 0.7, 1)
+  )) %>% 
+  ungroup() %>% 
+  select(permno, sorting_date, portfolio_size, portfolio_bm)
+```
+
+```{r}
+portfolios <- crsp_monthly %>% 
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, '0701')), 
+    month(month) >= 7 ~ ymd(paste0(year(month), '0701'))
+  )) %>% 
+  inner_join(portfolios, join_by(sorting_date, permno))
+```
+
+## FF3 factors
+
+For the size factor (i.e., SMB), we go long in the three small portfolios and short the three large portfolios by taking an average across either group. For the value factor (i.e., HML), we go long in the two high book-to-market portfolios and short the two low book-to-market portfolios, again weighting them equally.
+
+```{r}
+factors_replicated <- portfolios %>% 
+  group_by(month, portfolio_size, portfolio_bm) %>% 
+  summarise(ret = weighted.mean(ret_excess, mktcap_lag), .groups = 'drop') %>% 
+  group_by(month) %>% 
+  summarise(smb_replicated = mean(ret[portfolio_size == 1]) - mean(ret[portfolio_size == 2]), 
+            hml_replicated = mean(ret[portfolio_bm == 3]) - mean(ret[portfolio_bm == 1]))
+```
+
+## Evaluating the replication
+
+```{r}
+test <- factors_ff3_monthly |>
+  inner_join(factors_replicated, join_by(month)) |>
+  mutate(
+    across(c(smb_replicated, hml_replicated), ~round(., 4))
+  )
+model_smb <- lm(smb ~ smb_replicated, data = test)
+summary(model_smb)
+
+model_hml <- lm(hml ~ hml_replicated, data = test)
+summary(model_hml)
+```
+
+## FF5 factors
+
+```{r}
+other_sorting_variables <- compustat %>% 
+  mutate(sorting_date = ymd(paste0(year(datadate)+1, '0701'))) %>% 
+  select(gvkey, sorting_date, be, op, inv) %>% 
+  inner_join(market_equity, join_by(gvkey, sorting_date)) %>% 
+  mutate(bm = be / me) %>% 
+  select(permno, sorting_date, me, bm, op, inv)
+```
+
+```{r}
+sorting_variables <- size %>% 
+  inner_join(other_sorting_variables, join_by(permno, sorting_date)) %>% 
+  drop_na() %>% 
+  distinct(permno, sorting_date, .keep_all = T)
+```
+
+```{r}
+portfolios <- sorting_variables %>% 
+  group_by(sorting_date) %>% 
+  mutate(portfolio_size = assign_portfolio(
+    pick(everything()), size, c(0, 0.5, 1)
+  )) %>% 
+  group_by(sorting_date, portfolio_size) %>% 
+  mutate(across(
+    c(bm, op, inv), \(x) assign_portfolio(
+      pick(everything()), x, c(0, 0.3, 0.7, 1)
+      ), 
+    .names = 'portfolio_{.col}'
+    )) %>% 
+  ungroup() %>% 
+  select(sorting_date, permno, starts_with('portfolio'))
+```
+
+```{r}
+portfolios <- crsp_monthly %>% 
+  mutate(sorting_date = case_when(
+    month(month) <= 6 ~ ymd(paste0(year(month) - 1, '0701')), 
+    month(month) > 6 ~ ymd(paste0(year(month), '0701'))
+  )) %>% 
+  inner_join(portfolios, join_by(permno, sorting_date))
+```
+
+```{r}
+portfolios_value <- portfolios %>% 
+  group_by(portfolio_size, portfolio_bm, month) %>% 
+  summarise(ret = weighted.mean(ret_excess, mktcap_lag), .groups = 'drop')
+
+factors_value <- portfolios_value |>
+  group_by(month) |>
+  summarize(
+    hml_replicated = mean(ret[portfolio_bm == 3]) -
+      mean(ret[portfolio_bm == 1])
+  )
+
+portfolios_profitability <- portfolios |>
+  group_by(portfolio_size, portfolio_op, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), 
+    .groups = "drop"
+  ) 
+
+factors_profitability <- portfolios_profitability |>
+  group_by(month) |>
+  summarize(
+    rmw_replicated = mean(ret[portfolio_op == 3]) -
+      mean(ret[portfolio_op == 1])
+  )
+
+portfolios_investment <- portfolios |>
+  group_by(portfolio_size, portfolio_inv, month) |>
+  summarize(
+    ret = weighted.mean(ret_excess, mktcap_lag), 
+    .groups = "drop"
+  )
+
+factors_investment <- portfolios_investment |>
+  group_by(month) |>
+  summarize(
+    cma_replicated = mean(ret[portfolio_inv == 1]) -
+      mean(ret[portfolio_inv == 3])
+  )
+```
+
+```{r}
+factors_size <- bind_rows(
+  portfolios_value,
+  portfolios_profitability,
+  portfolios_investment
+) |> 
+  group_by(month) |>
+  summarize(
+    smb_replicated = mean(ret[portfolio_size == 1]) -
+      mean(ret[portfolio_size == 2])
+  )
+```
+
+```{r}
+factors_replicated <- factors_size |>
+  full_join(factors_value, join_by(month)) |>
+  full_join(factors_profitability, join_by(month)) |>
+  full_join(factors_investment, join_by(month))
+
+test <- factors_ff5_monthly |>
+  inner_join(factors_replicated, join_by(month)) |>
+  mutate(
+    across(c(smb_replicated, hml_replicated, 
+             rmw_replicated, cma_replicated), ~round(., 4))
+  )
+```
+
+```{r}
+model_smb <- lm(smb ~ smb_replicated, data = test)
+summary(model_smb)
+
+model_hml <- lm(hml ~ hml_replicated, data = test)
+summary(model_hml)
+
+model_rmw <- lm(rmw ~ rmw_replicated, data = test)
+summary(model_rmw)
+
+model_cma <- lm(cma ~ cma_replicated, data = test)
+summary(model_cma)
+```
