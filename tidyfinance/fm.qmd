@@ -1,0 +1,134 @@
+---
+title: "Fama-MacBeth Regressions"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute: 
+  eval: false
+---
+
+Use: to estimate the risk premium associated with risk factors
+
+The basic idea of the regression approach is to project asset returns on factor exposures or characteristics that resemble exposure to a risk factor in the cross-section **in each time period**. Then, in the second step, the estimates are aggregated across time to test if a risk factor is priced.
+
+$$
+\begin{aligned}r_{i,t+1} = \alpha_i + \lambda^{M}_t \beta^M_{i,t}  + \lambda^{SMB}_t \beta^{SMB}_{i,t} + \lambda^{HML}_t \beta^{HML}_{i,t} + \epsilon_{i,t}.\end{aligned}
+$$
+
+#### 2-Step Procedure
+
+Step 0: estimate $\beta$ in TS regression or simply use characteristics
+
+Step 1: estimate $\lambda$ cross-sectionally period by period
+
+Step 2: time-series mean + sd for HT
+
+## Cross-sectional regression
+
+estimate the risk premium from 3 characteristics: size (log market cap), bm ratio, and market beta
+
+```{r}
+pacman::p_load(tidyverse, duckdb, sandwich, broom)
+
+tidy_finance <- dbConnect(duckdb(), 'data/tidy_finance')
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  select(permno, gvkey, month, ret_excess, mktcap) |>
+  collect()
+
+compustat <- tbl(tidy_finance, "compustat") |>
+  select(datadate, gvkey, be) |>
+  collect()
+
+beta <- tbl(tidy_finance, "beta") |>
+  select(month, permno, beta_monthly) |>
+  collect()
+```
+
+```{r}
+characteristics <- compustat |>
+  mutate(month = floor_date(ymd(datadate), "month")) |>
+  left_join(crsp_monthly, join_by(gvkey, month)) |>
+  left_join(beta, join_by(permno, month)) |>
+  transmute(gvkey,
+    bm = be / mktcap,
+    log_mktcap = log(mktcap),
+    beta = beta_monthly,
+    sorting_date = month %m+% months(6)
+  )
+
+data_fama_macbeth <- crsp_monthly |>
+  left_join(characteristics, join_by(gvkey, month == sorting_date)) |>
+  group_by(permno) |>
+  arrange(month) |>
+  fill(c(beta, bm, log_mktcap), .direction = "down") |>
+  ungroup() |>
+  left_join(crsp_monthly |>
+    select(permno, month, ret_excess_lead = ret_excess) |>
+    mutate(month = month %m-% months(1)),
+  join_by(permno, month)
+  ) |>
+  select(permno, month, ret_excess_lead, beta, log_mktcap, bm) |>
+  drop_na()
+```
+
+Why are the chars lagged by 7 months instead of 1 month?
+
+At each $t$, run the cross-sectional regression:
+
+```{r}
+risk_premiums <- data_fama_macbeth |>
+  nest(data = -month) |>
+  mutate(estimates = map(
+    data,
+    ~ tidy(lm(ret_excess_lead ~ beta + log_mktcap + bm, data = .x))
+  )) |>
+  unnest(estimates)
+```
+
+## Time-series Aggregation
+
+note that the denominator is the sd of the mean.
+
+```{r}
+price_of_risk <- risk_premiums |>
+  group_by(factor = term) |>
+  summarize(
+    risk_premium = mean(estimate),
+    t_statistic = mean(estimate) / sd(estimate) * sqrt(n())
+  )
+```
+
+Newey-West SD via regression (to constant)
+
+```{r}
+regressions_for_newey_west <- risk_premiums %>% 
+  select(month, factor = term, estimate) %>% 
+  nest(data = -factor) %>% 
+  mutate(model = map(data, ~lm(estimate ~ 1, .)), 
+         mean = map(model, tidy))
+
+price_of_risk_newey_west <- regressions_for_newey_west %>% 
+  mutate(newey_west_se = map_dbl(model, ~sqrt(NeweyWest(.)))) %>% 
+  unnest(mean) %>% 
+  mutate(t_statistic_newey_west = estimate / newey_west_se) %>% 
+  select(factor, risk_premium = estimate,
+    t_statistic_newey_west)
+
+left_join(price_of_risk,
+  price_of_risk_newey_west |>
+    select(factor, t_statistic_newey_west),
+  join_by(factor)
+)
+
+```
+
+```{r}
+tidyfinance::estimate_fama_macbeth(
+  data = data_fama_macbeth, 
+  model = "ret_excess_lead ~ beta + bm + log_mktcap",
+  vcov = "newey-west", 
+  data_options = tidyfinance::data_options(date = 'month')
+)
+```
