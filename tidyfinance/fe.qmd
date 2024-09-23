@@ -1,0 +1,183 @@
+---
+title: "FE & Clustered SE"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute: 
+  eval: false
+bibliography: references.bib
+---
+
+# the investment regression
+
+firm investment modeled as a function that increases in firm cash flow and firm investment opportunities.
+
+```{r}
+pacman::p_load(tidyverse, duckdb, fixest)
+
+tidy_finance <- dbConnect(duckdb(), 'data/tidy_finance')
+crsp_monthly <- tbl(tidy_finance, "crsp_monthly") |>
+  select(gvkey, month, mktcap) |>
+  collect()
+
+compustat <- tbl(tidy_finance, "compustat") |>
+  select(datadate, gvkey, year, at, be, capx, oancf, txdb) |>
+  collect()
+```
+
+The classical investment regressions model the capital investment of a firm as a function of operating cash flows and Tobin’s q, a measure of a firm’s investment opportunities. We start by constructing investment and cash flows which are usually normalized by lagged total assets of a firm. In the following code chunk, we construct a *panel* of firm-year observations.
+
+```{r}
+data_investment <- compustat |>
+  mutate(month = floor_date(datadate, "month")) |>
+  left_join(compustat |>
+    select(gvkey, year, at_lag = at) |>
+    mutate(year = year + 1),
+  join_by(gvkey, year)
+  ) |>
+  filter(at > 0, at_lag > 0) |>
+  mutate(
+    investment = capx / at_lag,
+    cash_flows = oancf / at_lag
+  )
+
+data_investment <- data_investment |>
+  left_join(data_investment |>
+    select(gvkey, year, investment_lead = investment) |>
+    mutate(year = year - 1),
+    join_by(gvkey, year)
+  )
+```
+
+Tobin’s q is the ratio of the market value of capital to its replacement costs. We follow the implementation of Gulen and Ion (2015) and compute Tobin’s q as the market value of equity (`mktcap`) plus the book value of assets (`at`) minus book value of equity (`be`) plus deferred taxes (`txdb`), all divided by book value of assets (`at`).
+
+```{r}
+data_investment <- data_investment |>
+  left_join(crsp_monthly, join_by(gvkey, month)) |>
+  mutate(tobins_q = (mktcap + at - be + txdb) / at) |>
+  select(gvkey, year, investment_lead, cash_flows, tobins_q) |>
+  drop_na()
+```
+
+```{r}
+winsorize <- function(x, cut) {
+  x <- replace(
+    x,
+    x > quantile(x, 1 - cut, na.rm = T),
+    quantile(x, 1 - cut, na.rm = T)
+  )
+  x <- replace(
+    x,
+    x < quantile(x, cut, na.rm = T),
+    quantile(x, cut, na.rm = T)
+  )
+  return(x)
+}
+
+data_investment <- data_investment |>
+  mutate(across(
+    c(investment_lead, cash_flows, tobins_q),
+    ~ winsorize(., 0.01)
+  ))
+```
+
+## summary statistics
+
+```{r}
+data_investment |>
+  pivot_longer(
+    cols = c(investment_lead, cash_flows, tobins_q),
+    names_to = "measure"
+  ) |>
+  group_by(measure) |>
+  summarize(
+    mean = mean(value),
+    sd = sd(value),
+    min = min(value),
+    q05 = quantile(value, 0.05),
+    q50 = quantile(value, 0.50),
+    q95 = quantile(value, 0.95),
+    max = max(value),
+    n = n(),
+    .groups = "drop"
+  )
+```
+
+## Regressions
+
+simple ols
+
+$$
+\text{Investment}_{i,t+1} = \alpha + \beta_1\text{Cash Flows}_{i,t}+\beta_2\text{Tobin's q}_{i,t}+\varepsilon_{i,t},
+$$
+
+```{r}
+model_ols <- feols(
+  fml = investment_lead ~ cash_flows + tobins_q,
+  vcov = "iid",
+  data = data_investment
+)
+model_ols
+```
+
+firm fixed effects
+
+```{r}
+model_fe_firm <- feols(
+  investment_lead ~ cash_flows + tobins_q | gvkey,
+  vcov = "iid",
+  data = data_investment
+)
+model_fe_firm
+```
+
+two-way fixed effects
+
+```{r}
+model_fe_firmyear <- feols(
+  investment_lead ~ cash_flows + tobins_q | gvkey + year,
+  vcov = "iid",
+  data = data_investment
+)
+model_fe_firmyear
+```
+
+Note that we cannot include firm-year fixed effects in our setting because then cash flows and Tobin’s q are colinear with the fixed effects, and the estimation becomes void.
+
+Use `etable` to tabulate the regression output
+
+```{r}
+etable(
+  model_ols, model_fe_firm, model_fe_firmyear,
+  coefstat = "tstat", digits = 3, digits.stats = 3
+)
+```
+
+# Clustering standard errors
+
+The classic wisdom is to consider clustering at the level where (potential) outcomes could be correlated. If the cluster se is very different from the robust se, one should cluster.
+
+But @abadie2023 point out that this could result in unnecessarily large se. When deciding the clustering level, one should consider 1) the sampling mechanism; 2) the assignment mechanism; 3) the heterogeneity in treatment within a cluster (if any). Cluster standard errors at the sampling or assignment cluster level. Use their estimator for smaller se in cases where the standard cluster se is unnecessarily large.
+
+```{r}
+model_cluster_firm <- feols(
+  investment_lead ~ cash_flows + tobins_q | gvkey + year,
+  cluster = "gvkey",
+  data = data_investment
+)
+
+model_cluster_firmyear <- feols(
+  investment_lead ~ cash_flows + tobins_q | gvkey + year,
+  cluster = c("gvkey", "year"),
+  data = data_investment
+)
+```
+
+```{r}
+etable(
+  model_fe_firmyear, model_cluster_firm, model_cluster_firmyear,
+  coefstat = "tstat", digits = 3, digits.stats = 3
+)
+```
