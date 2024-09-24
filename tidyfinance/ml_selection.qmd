@@ -1,0 +1,312 @@
+---
+title: "Factor Selection via Machine Learning"
+format: html
+toc: true
+editor: visual
+editor_options: 
+  chunk_output_type: console
+execute: 
+  eval: false
+---
+
+```{r}
+pacman::p_load(duckdb, tidyverse, tidymodels, scales, furrr, glmnet, timetk)
+
+tidy_finance <- dbConnect(duckdb(), 'data/tidy_finance')
+
+factors_ff3_monthly <- tbl(tidy_finance, 'factors_ff3_monthly') %>% 
+  collect() %>% 
+  rename_with(~ str_c('factor_ff_', .), -month)
+
+factors_q_monthly <- tbl(tidy_finance, 'factors_q_monthly') %>% 
+  collect() %>% 
+  rename_with( ~ str_c('factor_q_', .), -month)
+
+macro_predictors <- tbl(tidy_finance, 'macro_predictors') %>% 
+  collect() %>% 
+  rename_with( ~ str_c('macro_', .), -month) %>% 
+  select(-macro_rp_div)
+
+industires_ff_monthly <- tbl(tidy_finance, 'industries_ff_monthly') %>% 
+  collect() %>% 
+  pivot_longer(-month, names_to = 'industry', values_to = 'ret') %>% 
+  arrange(desc(industry)) %>% 
+  mutate(industry = as_factor(industry))
+```
+
+```{r}
+data <- industires_ff_monthly %>% 
+  left_join(factors_ff3_monthly, join_by(month)) %>% 
+  left_join(factors_q_monthly, join_by(month)) %>% 
+  left_join(macro_predictors, join_by(month)) %>% 
+  mutate(ret = ret - factor_ff_rf) %>% 
+  select(month, industry, ret_excess = ret, everything()) %>% 
+  drop_na()
+```
+
+```{r}
+data |>
+  group_by(industry) |>
+  ggplot(aes(x = industry, y = ret_excess)) +
+  geom_boxplot() +
+  coord_flip() +
+  labs(
+    x = NULL, y = NULL,
+    title = "Excess return distributions by industry in percent"
+  ) +
+  scale_y_continuous(
+    labels = percent
+  )
+```
+
+## The tidymodels Workflow
+
+\(i\) pre-processing the data (data split and variable mutation)
+
+\(ii\) building models
+
+\(iii\) fitting models
+
+\(iv\) tuning models to create the “best” possible predictions.
+
+```{r}
+split <- initial_time_split(
+  data %>% filter(industry == 'manuf') %>% 
+    select(-industry), 
+  prop = 4/5
+)
+split
+
+```
+
+```{r}
+rec <- recipe(
+  ret_excess ~ ., 
+  data = training(split)
+) %>% 
+  step_rm(month) %>% 
+  step_interact(terms = ~ contains('factor'):contains('macro')) %>% 
+  step_normalize(all_predictors())
+```
+
+```{r}
+data_prep <- prep(rec, training(split))
+
+data_bake <- bake(data_prep, new_data = testing(split))
+data_bake
+
+#(mean(testing(split)$factor_ff_mkt_excess)-mean(training(split)$factor_ff_mkt_excess))/sd(training(split)$factor_ff_mkt_excess)
+
+#mean(data_bake$factor_ff_mkt_excess)
+#sd(data_bake$factor_ff_mkt_excess)
+
+```
+
+Note that `bake()` uses the mean and sd of the training sample to normalize the testing sample.
+
+```{r}
+lm_model <- linear_reg(penalty = .0001, mixture = 1) %>% 
+  set_engine('glmnet', intercept = F)
+
+lm_fit <- workflow() %>% 
+  add_recipe(rec) %>% 
+  add_model(lm_model)
+
+lm_fit
+```
+
+```{r}
+predicted_values <- lm_fit %>% 
+  fit(data = training(split)) %>% 
+  augment(data %>% filter(industry == 'manuf')) |>
+  select(month, 
+         "Fitted value" = .pred,
+         "Realization" = ret_excess
+  ) |>
+  pivot_longer(-month, names_to = "Variable")
+
+predicted_values |>
+  ggplot(aes(
+    x = month, 
+    y = value, 
+    color = Variable,
+    linetype = Variable
+    )) +
+  geom_line() +
+  labs(
+    x = NULL,
+    y = NULL,
+    color = NULL,
+    linetype = NULL,
+    title = "Monthly realized and fitted manufacturing industry risk premia"
+  ) +
+  scale_x_date(
+    breaks = function(x) {
+      seq.Date(
+        from = min(x),
+        to = max(x),
+        by = "5 years"
+      )
+    },
+    minor_breaks = function(x) {
+      seq.Date(
+        from = min(x),
+        to = max(x),
+        by = "1 years"
+      )
+    },
+    expand = c(0, 0),
+    labels = date_format("%Y")
+  ) +
+  scale_y_continuous(
+    labels = percent
+  ) +
+  annotate("rect",
+    xmin = testing(split) |> pull(month) |> min(),
+    xmax = testing(split) |> pull(month) |> max(),
+    ymin = -Inf, ymax = Inf,
+    alpha = 0.5, fill = "grey70"
+  )
+```
+
+```{r}
+lm_model <- linear_reg(
+  penalty = tune(),
+  mixture = tune()
+) |>
+  set_engine("glmnet")
+
+lm_fit <- lm_fit |>
+  update_model(lm_model)
+```
+
+```{r}
+data_folds <- time_series_cv(
+  data        = training(split),
+  date_var    = month,
+  initial     = "5 years",
+  assess      = "48 months",
+  cumulative  = FALSE,
+  slice_limit = 20
+)
+data_folds
+```
+
+```{r}
+lm_tune <- lm_fit |>
+  tune_grid(
+    resample = data_folds,
+    grid = grid_regular(penalty(), mixture(), levels = c(20, 3)),
+    metrics = metric_set(rmse)
+  )
+```
+
+```{r}
+autoplot(lm_tune) + 
+  aes(linetype = `Proportion of Lasso Penalty`) + 
+  guides(linetype = "none") +
+  labs(
+    x = "Penalty factor (lambda)",
+    y = "Root MSPE",
+    title = "Root MSPE for different penalty factors"
+  ) + 
+  scale_x_log10()
+```
+
+## Parallelized workflow
+
+run the penalized regressions for all ten industries
+
+```{r}
+lasso_model <- linear_reg(
+  penalty = tune(),
+  mixture = 1
+) |>
+  set_engine("glmnet")
+
+lm_fit <- lm_fit |>
+  update_model(lasso_model)
+```
+
+```{r}
+select_variables <- function(input) {
+  # Split into training and testing data
+  split <- initial_time_split(input, prop = 4 / 5)
+
+  # Data folds for cross-validation
+  data_folds <- time_series_cv(
+    data = training(split),
+    date_var = month,
+    initial = "5 years",
+    assess = "48 months",
+    cumulative = FALSE,
+    slice_limit = 20
+  )
+
+  # Model tuning with the Lasso model
+  lm_tune <- lm_fit |>
+    tune_grid(
+      resample = data_folds,
+      grid = grid_regular(penalty(), levels = c(10)),
+      metrics = metric_set(rmse)
+    )
+
+  # Identify the best model and fit with the training data
+  lasso_lowest_rmse <- lm_tune |> select_by_one_std_err(penalty, metric = "rmse")
+  lasso_final <- finalize_workflow(lm_fit, lasso_lowest_rmse)
+  lasso_final_fit <- last_fit(lasso_final, split, metrics = metric_set(rmse))
+
+  # Extract the estimated coefficients
+  estimated_coefficients <- lasso_final_fit |>
+    extract_fit_parsnip() |>
+    tidy() |>
+    mutate(
+      term = str_remove_all(term, "factor_|macro_|industry_")
+    )
+
+  return(estimated_coefficients)
+}
+
+# Parallelization
+plan(multisession, workers = availableCores())
+
+# Computation by industry
+selected_factors <- data |>
+  nest(data = -industry) |>
+  mutate(selected_variables = future_map(
+    data, select_variables,
+    .options = furrr_options(seed = TRUE)
+  ))
+```
+
+```{r}
+selected_factors |>
+  unnest(selected_variables) |>
+  filter(
+    term != "(Intercept)",
+    estimate != 0
+  ) |>
+  add_count(term) |>
+  mutate(
+    term = str_remove_all(term, "NA|ff_|q_"),
+    term = str_replace_all(term, "_x_", " "),
+    term = fct_reorder(as_factor(term), n),
+    term = fct_lump_min(term, min = 2),
+    selected = 1
+  ) |>
+  filter(term != "Other") |>
+  mutate(term = fct_drop(term)) |>
+  complete(industry, term, fill = list(selected = 0)) |>
+  ggplot(aes(industry,
+    term,
+    fill = as_factor(selected)
+  )) +
+  geom_tile() +
+  scale_x_discrete(guide = guide_axis(angle = 70)) +
+  scale_fill_manual(values = c("white", "grey30")) +
+  theme(legend.position = "None") +
+  labs(
+    x = NULL, y = NULL,
+    title = "Selected variables for different industries"
+  )
+```
